@@ -9,7 +9,14 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from astronomer_starship._af3.starship_compatability import StarshipAirflow, StarshipCompatabilityLayer
-from astronomer_starship.common import HttpError, get_kwargs_fn, telescope
+from astronomer_starship.common import (
+    HttpError,
+    NotFoundError,
+    build_source_connection_kwargs,
+    get_kwargs_fn,
+    normalize_source_conn_id,
+    telescope,
+)
 
 if TYPE_CHECKING:
     from typing import Callable
@@ -274,6 +281,41 @@ class StarshipApi(FastAPI):
             delete=starship_compat.delete_task_log,
             kwargs_fn=partial(get_kwargs_fn, attrs=starship_compat.task_log_attrs()),
         )
+
+    @router.api_route("/source_connection", methods=["GET", "POST", "DELETE"])
+    @staticmethod
+    def source_connection(
+        starship_route: Annotated[StarshipRoute, Depends(starship_route)],
+        starship_compat: Annotated[StarshipAirflow, Depends(starship_compat)],
+    ):
+        """Manage a source-Airflow Connection used by the Cutover Tool."""
+
+        def _get():
+            conn_id = normalize_source_conn_id(starship_route.args.get("conn_id"))
+            conn = starship_compat.get_source_connection(conn_id=conn_id)
+            if conn is None:
+                raise NotFoundError(f"No source connection configured for conn_id={conn_id!r}")
+            return conn
+
+        def _post():
+            payload = starship_route.json or {}
+            kwargs = build_source_connection_kwargs(payload)
+            conn_id = kwargs["conn_id"]
+            existed = starship_compat.source_connection_exists(conn_id)
+            if existed:
+                starship_compat.delete_connection(conn_id=conn_id)
+            created = starship_compat.set_connection(**kwargs)
+            return {
+                **created,
+                "action": "updated" if existed else "created",
+                "conn_id": conn_id,
+            }
+
+        def _delete():
+            conn_id = normalize_source_conn_id(starship_route.args.get("conn_id"))
+            return starship_compat.delete_connection(conn_id=conn_id)
+
+        return starship_route(get=_get, post=_post, delete=_delete)
 
     @router.api_route("/xcom", methods=["GET", "POST", "DELETE"])
     @staticmethod

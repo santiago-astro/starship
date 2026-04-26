@@ -12,7 +12,14 @@ from flask_appbuilder import BaseView, expose
 from astronomer_starship._af2.starship_compatability import (
     StarshipCompatabilityLayer,
 )
-from astronomer_starship.common import HttpError, get_kwargs_fn, telescope
+from astronomer_starship.common import (
+    HttpError,
+    NotFoundError,
+    build_source_connection_kwargs,
+    get_kwargs_fn,
+    normalize_source_conn_id,
+    telescope,
+)
 
 if TYPE_CHECKING:
     from typing import Callable
@@ -230,6 +237,46 @@ class StarshipApi(BaseView):
             delete=starship_compat.delete_task_log,
             kwargs_fn=partial(get_kwargs_fn, attrs=starship_compat.task_log_attrs()),
         )
+
+    @expose("/source_connection", methods=["GET", "POST", "DELETE"])
+    @csrf.exempt
+    def source_connection(self):
+        """Manage a source-Airflow Connection used by the Cutover Tool.
+
+        The frontend POSTs a platform-specific payload including the
+        desired ``conn_id`` (default ``starship_source``); we translate it
+        to a standard Airflow HTTP Connection so the operator/template DAG
+        and the wave engine can reuse it unchanged. GET and DELETE accept
+        ``?conn_id=`` to operate on a specific connection.
+        """
+        starship_compat = StarshipCompatabilityLayer()
+
+        def _get():
+            conn_id = normalize_source_conn_id(request.args.get("conn_id"))
+            conn = starship_compat.get_source_connection(conn_id=conn_id)
+            if conn is None:
+                raise NotFoundError(f"No source connection configured for conn_id={conn_id!r}")
+            return conn
+
+        def _post():
+            payload = request.json or {}
+            kwargs = build_source_connection_kwargs(payload)
+            conn_id = kwargs["conn_id"]
+            existed = starship_compat.source_connection_exists(conn_id)
+            if existed:
+                starship_compat.delete_connection(conn_id=conn_id)
+            created = starship_compat.set_connection(**kwargs)
+            return {
+                **created,
+                "action": "updated" if existed else "created",
+                "conn_id": conn_id,
+            }
+
+        def _delete():
+            conn_id = normalize_source_conn_id(request.args.get("conn_id"))
+            return starship_compat.delete_connection(conn_id=conn_id)
+
+        return starship_route(get=_get, post=_post, delete=_delete)
 
     # @auth.has_access([(permissions.ACTION_CAN_READ, permissions.RESOURCE_TASK_INSTANCE)])
     @expose("/xcom", methods=["GET", "POST", "DELETE"])
