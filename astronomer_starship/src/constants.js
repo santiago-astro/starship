@@ -27,6 +27,24 @@ export const ROUTES = Object.freeze({
   DAGS: 'dags',
   TELESCOPE: 'telescope',
   CUTOVER: 'cutover',
+  CUTOVER_HISTORY: 'cutover-history',
+});
+
+/**
+ * Chakra colorScheme for each cutover status. Used for both wave-level
+ * statuses (Cutover History) and per-DAG row statuses (Cutover Status),
+ * so the per-DAG-only values (`deferred`, `skipped`) live here too.
+ * Callers fall back to 'gray' for unknown statuses.
+ */
+export const CUTOVER_STATUS_COLORS = Object.freeze({
+  running: 'info',
+  completed: 'success',
+  failed: 'error',
+  aborted: 'warning',
+  rolled_back: 'warning',
+  deferred: 'amethyst',
+  skipped: 'gray',
+  pending: 'gray',
 });
 
 /**
